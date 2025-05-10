@@ -14,24 +14,6 @@ current account.
 - Assume the environment being queried is a large account with lots of
 instances and AMIs. Output results to stdout.
 
-## Plan
-
-- Fetch EC2 Instances
-    - Boto3, `describe_instances` should work, it includes `ImageId` (https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/ec2/client/describe_instances.html) 
-    - What does "current" region infer? I'll default to using env vars (ex: `export AWS_DEFAULT_REGION=us-east-1`) and refactor if nessisary.
-    - It will be large, the `describe_instance` documentation includes "We strongly recommend using only paginated requests. Unpaginated requests are susceptible to throttling and timeouts."
-        - Example of how to use paginator with Boto3: https://www.learnaws.org/2023/02/14/aws-boto3-paginator/
-    - Should I filter EC2 data, ex tags, type, or recently reminated instances? The `describe_instance` documentation includes "Recently terminated instances might appear in the returned results. This interval is usually less than one hour."
-
-- Format JSON output.
-    - We will need the following 
-        - `ami_id`
-            - `ImageDescription`
-            - `ImageName`
-            - `ImageLocation`
-            - `OwnerId`
-            - `InstanceIds` (list)
-
 Example output:
 
 ```
@@ -67,3 +49,27 @@ Example output:
   }
 }
 ```
+
+## Plan
+
+I’ll begin by discovering all EC2 instances in whatever region is active (I’ll rely on `AWS_DEFAULT_REGION`, e.g. `export AWS_DEFAULT_REGION=us-east-1`).  For each instance, I’ll pull its `ImageId` using Boto3’s [`describe_instances`](https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/ec2/client/describe_instances.html) call with a paginator (see this [paginator example](https://www.learnaws.org/2023/02/14/aws-boto3-paginator/), it helps avoid throttling when the account is large).  I’ll group instance IDs by AMI.
+
+Next, I’ll fetch details for the unique set of AMI IDs in one go via `describe_images(ImageIds=[…])`.  From each image I’ll grab `Description`, `Name`, `ImageLocation`, and `OwnerId`, and default to `null` if any of those fields aren’t present (for example, when an AMI has been deleted or belongs to another account).
+
+I’m aware that recently terminated instances can still show up in `describe_instances` for about an hour, if needed I can filter those out later, but for now I’ll accept that minor noise. 
+
+Finally, I’ll assemble a JSON object keyed by each AMI ID, with something like:
+
+```json
+{
+  "ami-0123456789abcdef0": {
+    "ImageDescription": "...",
+    "ImageName":        "...",
+    "ImageLocation":    "...",
+    "OwnerId":          "...",
+    "InstanceIds":      ["i-0123...", "i-0456..."]
+  },
+
+}
+```
+
